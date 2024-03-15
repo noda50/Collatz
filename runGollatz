@@ -1,0 +1,174 @@
+#! /usr/bin/env ruby
+## -*- mode: ruby; coding: utf-8 -*-
+## = run generalized Collatz.
+## Author:: Itsuki Noda
+## Version:: 0.0 2024/03/14 I.Noda
+##
+## === History
+## * [2024/03/14]: Create This File.
+## * [YYYY/MM/DD]: add more
+## == Usage
+## * ...
+
+def $LOAD_PATH.addIfNeed(path, lastP = false)
+  existP = self.index{|item| File.identical?(File.expand_path(path),
+                                             File.expand_path(item))} ;
+  if(!existP) then
+    if(lastP) then
+      self.push(path) ;
+    else
+      self.unshift(path) ;
+    end
+  end
+end
+
+$LOAD_PATH.addIfNeed("~/lib/ruby");
+# $LOAD_PATH.addIfNeed(File.dirname(__FILE__));
+
+require 'optparse' ;
+require 'pp' ;
+require 'json' ;
+
+require 'ItkThreadPool.rb' ;
+
+require './Gollatz.rb' ;
+
+#------------------------------------------------------------------------
+#++
+$conf = {
+  :mode => :single,  # :multi
+  :base => nil,
+  :untilN => 10000,
+  :paraN => 8,
+  :verboseP => true,
+  :resultFile => $0 + ".result.json",
+  :initResultP => false,
+} ;
+
+#----------------------------------------------------------------------
+#++
+## help
+def help(raiseOrExit=true)
+  puts($op) ;
+  puts("Defaults:") ;
+  pp $conf ;
+  if(raiseOrExit.is_a?(Exception)||raiseOrExit.is_a?(String)) then
+    puts('-' * 20) ;
+    raise raiseOrExit ;
+  elsif(raiseOrExit) then
+    exit(1) ;
+  end
+end
+
+#------------------------------------------------------------------------
+#++
+$op = OptionParser.new() {|op|
+  op.banner = <<_END_
+  Usage: #{$0} [Options]* Base
+_END_
+
+  op.separator("Options:") ;
+  op.set_summary_indent("") ;
+  op.set_summary_width(60) ;
+  sep = "\n\t\t" ;
+
+  op.on("-u","--untilN UntilN", Integer, sep + "check until N.") {|n|
+    $conf[:untilN] = n ;
+  }
+  op.on("-P", "--paraN ParaN", Integer, sep + "parallel N.") {|n|
+    $conf[:paraN] = n ;
+  }
+  op.on("-V","--silent", sep + "no verbose mode.") {
+    $conf[:verboseP] = false ;
+  }
+  op.on("-S","--single", sep + "single mode.") {
+    $conf[:mode] = :single ;
+  }
+  op.on("-M","--multi", sep + "multi mode.") {
+    $conf[:mode] = :multi ;
+  }
+  op.on("-r","--result ResultFile", String,
+        sep + "result file (for multi mode).") {|file|
+    $conf[:resultFile] = file ;
+  }
+  op.on("-I","--initResult", 
+        sep + "initialize result file (for multi mode).") {
+    $conf[:initResultP] = true ;
+  }
+  op.on_tail("--help", sep + "show this message.") { |h|
+    help() ;
+  }
+}
+
+begin
+  $op.parse!(ARGV) ;
+rescue => ex
+  help(ex) ;
+end
+
+$restArg = ARGV ;
+help() if($restArg.size != 1) ;
+
+$conf[:base] = $restArg[0].to_i ;
+
+p [:rest, ARGV], [:conf,$conf] if($conf[:verboseP]) ;
+
+########################################################################
+########################################################################
+########################################################################
+
+case($conf[:mode]) 
+  ##------------------------------
+when :single ;
+  gol = Gollatz.new({ base: $conf[:base]} ) ;
+  trailInfo = gol.getTrailLoopTable($conf[:untilN], true) ;
+  result = { base: $conf[:base],
+             trailInfo: trailInfo }
+  p result ;
+  ##------------------------------
+when :multi ;
+  mutex = Mutex.new() ;
+  resultTable = {} ;
+  if($conf[:initResultP]) then
+    mutex.synchronize{
+      system("rm -f #{$conf[:resultFile]}") ;
+    }
+  else
+    mutex.synchronize{
+      open($conf[:resultFile],"r") {|strm|
+        while(oneLine = strm.gets())
+          result = JSON.parse(oneLine, { symbolize_names: true }) ;
+          resultTable[result[:base]] = result ;
+        end
+      }
+    }
+  end
+  tpool = Itk::ThreadPool.new($conf[:paraN]) ;
+  (2..$conf[:base]).each{|b|
+    if(!resultTable[b]) then
+      tpool.fork(b){|base|
+        com = [$0, "--silent", "--single",
+               "--paraN", $conf[:paraN],
+               "--untilN", $conf[:untilN],
+               base].join(" ") ;
+        result = nil ;
+        open("| #{com}", "r"){|strm| result = eval(strm.read) ; }
+        mutex.synchronize{
+          open($conf[:resultFile],"a") {|strm|
+            strm << JSON.generate(result) << "\n" ;
+          }
+        }
+        p [:result, result] ;
+      }
+      sleep(0.1) ;
+    else
+      p [:skip, b] ;
+    end
+  }
+  tpool.waitAll() ;
+  ##------------------------------
+else
+  raise "unknown mode: " + $conf[:mode].inspect ;
+end
+
+  

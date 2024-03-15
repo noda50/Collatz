@@ -90,9 +90,9 @@ class Gollatz < WithConfParam
     _n = _startN ;
     _k = 0 ;
     while(_loopM.nil? || _k < _loopM)
-      _block.call(_n, _k) ;
       _n = cycle(_n) ;
       _k += 1 ;
+      _block.call(_n, _k) ;
     end
   end
 
@@ -102,7 +102,7 @@ class Gollatz < WithConfParam
   ## _startN_:: about argument bar
   ## *return*:: list to 1.
   def trailUntilOne(_startN, _destN = 1)
-    _trail = [] ;
+    _trail = [_startN] ;
     self.each(_startN){|_n,_k|
       _trail.push(_n) ;
       break if(_n == _destN && _k > 0) ;
@@ -118,6 +118,7 @@ class Gollatz < WithConfParam
   ## *return*:: list to 1.
   def trailUntilLoop(_startN, _destList = [])
     _trail = _destList.dup ;
+    _trail.push(_startN) ;
     self.each(_startN){|_n,_k|
       _loopP = _trail.include?(_n) ;
       _trail.push(_n) ;
@@ -205,20 +206,37 @@ class Gollatz < WithConfParam
   ##                         lower: _lowerMember_,
   ##                         loop: [...],
   ##                         members: [...] }
-  def getTrailLoopTable(_untilN)
+  def getTrailLoopTable(_untilN, _shortP = false)
     @trailLoopTable = {} ;
     (1.._untilN).each{|_startN|
       _trailInfo = getTrailInfo(_startN) ;
+#      p _trailInfo ;
       _bottom = _trailInfo[:loopBottom]
       if(@trailLoopTable[_bottom].nil?) then
+        _loopTrail = _trailInfo[:loopTrail] ;
+        _normalizedTrail = (_loopTrail[_loopTrail.find_index(_bottom)..-1] +
+                            _loopTrail[0..._loopTrail.find_index(_bottom)]) ;
         @trailLoopTable[_bottom] = {
-          loopBottom: _trailInfo[:loopBottom],
+          loopBottom: _bottom,
           loopSize: _trailInfo[:loopSize],
           members: [],
-          loopTrail: _trailInfo[:loopTrail],
+          loopTrail: _normalizedTrail,
         } ;
       end
+      @trailLoopTable[_bottom][:members].push(_startN) ;
+      @trailLoopTable[_bottom][:memberSize] =
+        @trailLoopTable[_bottom][:members].size ;
     }
+    if(_shortP) then
+      @trailLoopTable.each{|_base, _trailInfo|
+        _trailInfo[:minMember] = _trailInfo[:members].first ;
+        _trailInfo[:maxMember] = _trailInfo[:members].last ;
+        [:members, :loopTrail].each{|_key|
+          _trailInfo.delete(_key) ;
+        }
+      }
+    end
+    
     return @trailLoopTable ;
   end
 
